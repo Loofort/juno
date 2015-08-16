@@ -4,19 +4,20 @@ import (
 	"encoding/base64"
 	"golang.org/x/net/context"
 	"juno/common"
+	"juno/model"
 	"juno/model/storage"
 	"net/http"
 )
 
 // authMW is the Authentication aware router type
 type authMW struct {
-	base    ContextRouter
-	storage storage.Storage
+	base ContextRouter
+	stg  storage.Storage
 }
 
 // Authentication returns router that perform Authentication check before handle requests
-func Authentication(base ContextRouter, storage storage.Storage) ContextRouter {
-	return authMW{base, storage}
+func Authentication(base ContextRouter, stg storage.Storage) ContextRouter {
+	return authMW{base, stg}
 }
 
 // Handle add authorization check middleware before handler call.
@@ -34,13 +35,13 @@ func (mw authMW) Handle(method, path string, handler JunoHandler) {
 				pair := bytes.SplitN(payload, []byte(":"), 2)
 				if len(pair) == 2 {
 					// check user in storage.
-					user, ok := mw.storage.UserByCreds(string(pair[0]), string(pair[1]))
+					user, ok := mw.stg.UserByCreds(string(pair[0]), string(pair[1]))
 					if !ok {
 						common.SendErr(w, http.StatusForbidden, "Forbidden")
 					}
 
 					// put user to context
-					setCtxUser(ctx, user)
+					ctx = setCtxUser(ctx, user)
 
 					// Delegate request to the given handle
 					handler(ctx, w, r)
@@ -56,15 +57,4 @@ func (mw authMW) Handle(method, path string, handler JunoHandler) {
 
 	// configure base router with auth handler
 	mw.base.Handle(method, path, authHandler)
-}
-
-// add user object to conext
-func setCtxUser(ctx context.Context, user model.User) context.Context {
-	return context.WithValue(ctx, userKey, p)
-}
-
-// CtxUser returns User saved in context, second variable is false when no user is found (anonymous mode)
-func CtxUser(ctx context.Context, name string) (string, bool) {
-	user, ok := ctx.Value(userKey).(model.User)
-	return user, ok
 }

@@ -2,6 +2,7 @@ package main
 
 import (
 	"github.com/bndr/gopencils"
+	"juno/common/io"
 	"os"
 	"testing"
 	"time"
@@ -250,17 +251,12 @@ func getHistory(auth *gopencils.BasicAuth, profid string) ([]*model.Change, erro
 	return changes, nil
 }
 
-type ErrorResp struct {
-	Code    int
-	Message string
-}
-
 func checkErr(res *gopencils.Resource, err error) error {
 	if err != nil {
 		return err
 	}
 
-	eresp := &ErrorResp{}
+	eresp := &io.ErrJSON{}
 	err = json.NewDecoder(res.Row.Body).Decode(eresp)
 	if err != nil {
 		return err
