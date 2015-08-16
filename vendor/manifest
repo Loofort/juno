@@ -1,0 +1,18 @@
+{
+	"version": 0,
+	"dependencies": [
+		{
+			"importpath": "code.google.com/p/goauth2/oauth",
+			"repository": "https://code.google.com/p/goauth2",
+			"revision": "222e66a2882e",
+			"branch": "default",
+			"path": "/oauth"
+		},
+		{
+			"importpath": "github.com/bndr/gopencils",
+			"repository": "https://github.com/bndr/gopencils",
+			"revision": "e9c8039cf77402adfa4a6ae94bd7b3416f77c0a4",
+			"branch": "master"
+		}
+	]
+}
