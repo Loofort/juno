@@ -6,8 +6,20 @@ import (
 	"juno/middle"
 	"juno/model"
 	"juno/model/storage"
+	"log"
 	"net/http"
 )
+
+// error messages displayed to client
+const (
+	ERR_DB     = "Oops! database problem, try again latter"
+	ERR_NOPROF = "profile not found"
+	DB_NOUSER  = "user not found"
+	ERR_REQ    = "something wrong with your request body"
+)
+
+// initialize custom loger, because we will use log.Output(calldepth, msg)
+var clog = log.New(os.Stderr, "", log.LstdFlags)
 
 // Controller provides handler for each routes
 // It keeps storage object
@@ -18,7 +30,7 @@ type Controller struct {
 // ################ User Handlers ##################
 
 func (c Controller) UserCreate(ctx context.Context, w http.ResponseWriter, r *http.Request) {
-	user := model.NewUser()
+	user := &model.User{}
 	if inputErr(r, user) {
 		return
 	}
@@ -32,7 +44,7 @@ func (c Controller) UserCreate(ctx context.Context, w http.ResponseWriter, r *ht
 	// we check dublicates on insert
 	user, err := c.stg.UserInsert(ctx, user)
 	if err != nil {
-		if _, ok := err.(storage.ErrDublicate); ok {
+		if c.stg.IsErrDups(err) {
 			io.ErrClient(w, "The email is already registered")
 			return
 		}
@@ -51,25 +63,9 @@ func (c Controller) UserCreate(ctx context.Context, w http.ResponseWriter, r *ht
 func (c Controller) UserConfirm(ctx context.Context, w http.ResponseWriter, r *http.Request) {
 	userid, _ := middle.CtxParam("userid")
 
-	user, err := c.stg.UserGet(ctx, userid)
-	if dbErr(w, err) {
-		return
-	}
-
-	if user == nil {
-		io.Err(w, "User not found", http.StatusNotFound)
-		return
-	}
-
-	if user.Confirm {
-		io.ErrClient(w, "User is already confirmed")
-		return
-	}
-
-	user.Confirm = true
-	user, err = c.stg.UserUpdate(ctx, user)
-
-	if dbErr(w, err) {
+	// execute getAndModify on storage
+	user, err = c.stg.UserConfirm(ctx, userid)
+	if c.dbErrOrEmpty(w, err, DB_NOUSER) {
 		return
 	}
 
@@ -86,7 +82,7 @@ func (c Controller) UserConfirm(ctx context.Context, w http.ResponseWriter, r *h
 // ProfileUpdate Handler allows to modify own user profile.
 func (c Controller) ProfileUpdate(ctx context.Context, w http.ResponseWriter, r *http.Request) {
 	// read profile from input
-	inProfile := model.NewProfile()
+	inProfile := &model.Profile{}
 	if inputErr(r, inProfile) {
 		return
 	}
@@ -99,14 +95,7 @@ func (c Controller) ProfileUpdate(ctx context.Context, w http.ResponseWriter, r 
 
 	// read profile from storage. W is telling that we want open profile for writing
 	dbProfile, err := c.stg.ProfileGetW(ctx, inProfile.ID)
-	if dbErr(w, err) {
-		return
-	}
-
-	if dbProfile == nil {
-		// profile doesn't exist or user hasn't permission
-		// in both cases client is doing something wrong
-		io.ErrClient(w, "can't update this profile")
+	if c.dbErrOrEmpty(w, err, ERR_NOPROF) {
 		return
 	}
 
@@ -119,17 +108,35 @@ func (c Controller) ProfileUpdate(ctx context.Context, w http.ResponseWriter, r 
 	io.Output(w, profile)
 }
 
+// ProfileUpdate Handler allows to modify own user profile.
+func (c Controller) ProfileUpdate(ctx context.Context, w http.ResponseWriter, r *http.Request) {
+	// read profile from input
+	profile := &model.Profile{}
+	if inputErr(r, profile) {
+		return
+	}
+
+	// Validate says which field is invalid
+	if err := profile.Validate(); err != nil {
+		io.ErrClient(w, err)
+		return
+	}
+
+	// update
+	profile, err := c.stg.ProfileUpdate(ctx, profile)
+	if c.dbErrOrEmpty(w, err, ERR_NOPROF) {
+		return
+	}
+
+	io.Output(w, profile)
+}
+
 // ProfileUpdate Handler allows to view just own profile history.
 func (c Controller) ProfileHistory(ctx context.Context, w http.ResponseWriter, r *http.Request) {
 	profid, _ := middle.CtxParam("profid")
 
 	changes, err := c.stg.ProfileHistory(ctx, profid)
-	if dbErr(w, err) {
-		return
-	}
-	if changes == nil {
-		// err code could be either 404 or 403, so let it be 400
-		io.ErrClient(w, "can't display history of this profile")
+	if c.dbErrOrEmpty(w, err, ERR_NOPROF) {
 		return
 	}
 
@@ -140,22 +147,15 @@ func (c Controller) ProfileGet(ctx context.Context, w http.ResponseWriter, r *ht
 	profid, _ := middle.CtxParam("profid")
 
 	profile, err := c.stg.ProfileGet(ctx, profid)
-	if dbErr(w, err) {
+	if c.dbErrOrEmpty(w, err, ERR_NOPROF) {
 		return
 	}
 
-	if profile == nil {
-		// profile can be obtained by anonym, it just not found
-		io.Err(w, "profile not found", http.StatusNotFound)
-		return
-	}
-
-	io.Output(w, profile)
+	return profile
 }
 
 func (c Controller) ProfileAll(ctx context.Context, w http.ResponseWriter, r *http.Request) {
-
-	profiles, err := c.stg.ProfileAll(ctx, profid)
+	profiles, err := c.stg.ProfileAll(ctx)
 	if dbErr(w, err) {
 		return
 	}
@@ -163,11 +163,24 @@ func (c Controller) ProfileAll(ctx context.Context, w http.ResponseWriter, r *ht
 	io.Output(w, profiles)
 }
 
-// ##################### helper functions ##################
+// ##################### Helper Functions ##################
+
+func (c Controller) dbErrOrEmpty(w http.ResponseWriter, err error, msg string) bool {
+	if c.stg.IsErrNotFound(err) {
+		io.Err(w, msg, http.StatusNotFound)
+		return true
+	}
+	return dbErr(w, err)
+}
 
 func dbErr(w http.ResponseWriter, err error) bool {
 	if err != nil {
-		io.ErrServer(w, "Oops! database problem, try again latter")
+		// send to user common err message
+		io.ErrServer(w, ERR_DB)
+
+		// log real db error
+		clog.Output(2, err.Error())
+
 		return true
 	}
 	return false
@@ -175,7 +188,7 @@ func dbErr(w http.ResponseWriter, err error) bool {
 
 func inputErr(r *http.Request, obj interface{}) bool {
 	if err := io.Input(r, obj); err != nil {
-		io.ErrClient(w, "something wrong with your request body")
+		io.ErrClient(w, ERR_REQ)
 		return true
 	}
 	return false

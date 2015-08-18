@@ -3,8 +3,7 @@ package middle
 import (
 	"encoding/base64"
 	"golang.org/x/net/context"
-	"juno/common"
-	"juno/model"
+	"juno/common/io"
 	"juno/model/storage"
 	"net/http"
 )
@@ -35,9 +34,13 @@ func (mw authMW) Handle(method, path string, handler JunoHandler) {
 				pair := bytes.SplitN(payload, []byte(":"), 2)
 				if len(pair) == 2 {
 					// check user in storage.
-					user, ok := mw.stg.UserByCreds(string(pair[0]), string(pair[1]))
-					if !ok {
-						common.SendErr(w, http.StatusForbidden, "Forbidden")
+					user, err := mw.stg.UserByCreds(ctx, string(pair[0]), string(pair[1]))
+					if err != nil {
+						io.ErrServer(w, "Oops! database problem, try again latter")
+						return true
+					}
+					if user == nil {
+						io.SendErr(w, http.StatusForbidden, "Forbidden")
 					}
 
 					// put user to context
@@ -52,7 +55,7 @@ func (mw authMW) Handle(method, path string, handler JunoHandler) {
 
 		// Request Basic Authentication otherwise
 		w.Header().Set("WWW-Authenticate", "Basic realm=\"Private Area\"")
-		common.SendErr(w, http.StatusUnauthorized, "Unauthorized")
+		io.SendErr(w, http.StatusUnauthorized, "Unauthorized")
 	}
 
 	// configure base router with auth handler

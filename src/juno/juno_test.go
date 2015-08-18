@@ -53,6 +53,7 @@ func LiveCircleTest(t *testing.T) {
 	profile.LastName = "Smith"
 	profile.Address = "100 E. 17th Street, New York"
 	profile.Phone = "+1-212-674-4300"
+	profile.Age = 30
 	profile, err = updateProfile(auth, profile)
 	if err != nil {
 		t.Fatal(err)

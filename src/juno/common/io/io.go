@@ -12,6 +12,7 @@ func Input(r *http.Request, obj interface{}) error {
 	dec := json.NewDecoder(r.Body)
 	if err := dec.Decode(obj); err != nil {
 		// todo: r.Body also should be written to log, but it needs to implement some protections
+		// todo: json throws UnmarshalTypeError. we can handle it to determine bad field name and value to show to user.
 		log.Println(err)
 		return err
 	}

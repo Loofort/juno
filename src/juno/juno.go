@@ -11,11 +11,11 @@ import (
 
 func main() {
 	// get config var
-	port := env("JUNO_PORT")
-	mongoHost := env("JUNO_MONGO_HOST")
+	port := envMustGet("JUNO_PORT")
+	mhost := envMustGet("JUNO_MONGO_HOST")
 
 	// initialize mongo
-	s := storage.New(mongoHost)
+	s := storage.MgoMustConnect(mhost)
 	defer s.Close()
 
 	// controller have to work with storage
@@ -47,9 +47,9 @@ func main() {
 	log.Panic(http.ListenAndServe("localhost:"+port, r))
 }
 
-// all env variable are necessary
-// program stops if one is missing
-func env(name string) string {
+// all env variable are necessary.
+// It panics if var is missing, and program will stop.
+func envMustGet(name string) string {
 	str := os.Getenv(name)
 	if env == "" {
 		log.Panicf("can't find environment variable %s", name)

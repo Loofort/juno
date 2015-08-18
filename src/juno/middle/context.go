@@ -3,6 +3,7 @@ package middle
 import (
 	"github.com/dimfeld/httptreemux"
 	"golang.org/x/net/context"
+	"juno/storage"
 	"log"
 )
 
@@ -26,7 +27,7 @@ type contextMW struct {
 }
 
 // Context creates context aware wrapper for usual router
-func Context(base Router) ContextRouter {
+func Context(base Router, stg storage.Storage) ContextRouter {
 	return contextMW{base}
 }
 
@@ -34,6 +35,8 @@ func Context(base Router) ContextRouter {
 // Adapter handler creates context and passes it to final handler
 func (mw contextMW) Handle(method, path string, handler JunoHandler) {
 	adapter := func(w http.ResponseWriter, r *http.Request, p map[string]string) {
+		// context is used to preserve auth info (used by storage layer to check access permissions).
+		// it also might be used to cancel current session, by request or by timeout (not implemented).
 
 		// there is no timeout requirements, so create just cancelable context
 		ctx, cancel = context.WithCancel(context.Background())
@@ -44,6 +47,11 @@ func (mw contextMW) Handle(method, path string, handler JunoHandler) {
 
 		// add anonym user. It might be overrided in authentication mw
 		ctx = setCtxUser(ctx, model.Anonym())
+
+		// storage may want to reserve resource per session that has to release at the end
+		// put it in context too
+		ctx, release := mv.stg.Reserve(ctx)
+		defer release()
 
 		handler(ctx, w, r)
 	}
@@ -71,13 +79,13 @@ func CtxParam(ctx context.Context, name string) (string, bool) {
 }
 
 // setCtxUser adds user object to conext
-func setCtxUser(ctx context.Context, user model.User) context.Context {
+func setCtxUser(ctx context.Context, user *model.User) context.Context {
 	return context.WithValue(ctx, userKey, p)
 }
 
 // CtxUser returns User from context
-func CtxUser(ctx context.Context) model.User {
-	user, ok := ctx.Value(userKey).(model.User)
+func CtxUser(ctx context.Context) *model.User {
+	user, ok := ctx.Value(userKey).(*model.User)
 	if !ok {
 		log.Println("no user in context") // todo: write call stack
 		user = model.Anonym()
