@@ -5,44 +5,35 @@ import (
 	"golang.org/x/net/context"
 	"gopkg.in/mgo.v2"
 	"gopkg.in/mgo.v2/bson"
-	"juno/middle"
+	"juno/model"
 	"log"
 )
 
 const MGO_COLLECTION = "people"
 
 type mongoStg struct {
-	// we will copy the base session each time we need concurrent mgo call
-	base *mgo.Session
+	// we will copy the main session each time we need concurrent mgo call
+	main *mgo.Session
 }
 
 // MgoMustConnect create mongo connection, and returns storage.
 // It's intended to be called on startup, as storage constructor.
 // It panics on error
-func MgoMustConnect(mhost, database, name, pass string) Storage {
+func MgoMustConnect(url string) Storage {
 	// connect to mongo
-	// todo: create a separate mongo user for particular database
-	info := &mgo.DialInfo{
-		Addrs:    []string{mhost},
-		Timeout:  60 * time.Second,
-		Database: database,
-		Username: name,
-		Password: pass,
-	}
-
-	sess, err := mgo.DialWithInfo(info)
+	sess, err := mgo.Dial(url)
 	if err != nil {
 		panic(err)
 	}
 
 	// Optional. Switch the session to a monotonic behavior.
 	sess.SetMode(mgo.Monotonic, true)
-	c := sess.DB().C(MGO_COLLECTION)
+	c := sess.DB("").C(MGO_COLLECTION)
 
 	// create indexes if don't exist
-	indexes := []Index{
+	indexes := []mgo.Index{
 		// to control email duplicates,
-		Index{
+		mgo.Index{
 			Key:        []string{"email"},
 			Unique:     true,
 			DropDups:   false,
@@ -50,14 +41,14 @@ func MgoMustConnect(mhost, database, name, pass string) Storage {
 			Sparse:     true,
 		},
 		// for fast auth access
-		Index{
+		mgo.Index{
 			Key:        []string{"email", "password"},
 			DropDups:   false,
 			Background: true,
 			Sparse:     true,
 		},
 		// to get confirmed user
-		Index{
+		mgo.Index{
 			Key:        []string{"_id", "confirm"},
 			Unique:     true,
 			Background: true,
@@ -65,7 +56,7 @@ func MgoMustConnect(mhost, database, name, pass string) Storage {
 		},
 	}
 
-	for _, index = range indexes {
+	for _, index := range indexes {
 		if err := c.EnsureIndex(index); err != nil {
 			panic(err)
 		}
@@ -77,7 +68,7 @@ func MgoMustConnect(mhost, database, name, pass string) Storage {
 // Close is shutdown the connection,
 // It's intended to be call as destructor
 func (s mongoStg) Close() {
-	s.sess.Close()
+	s.main.Close()
 }
 
 func (s mongoStg) IsErrNotFound(err error) bool {
@@ -96,8 +87,8 @@ var colKey ctxKey = 0
 // and puts in context collection that could be queried concurrently.
 // It returns modified context and release function that puts db session back to the pool
 func (s mongoStg) Reserve(ctx context.Context) (context.Context, ReleaseFunc) {
-	sess = s.base.Copy()
-	c := sess.DB().C(MGO_COLLECTION)
+	sess := s.main.Copy()
+	c := sess.DB("").C(MGO_COLLECTION)
 
 	// in complex application we would preserve session, not collection
 	ctx = context.WithValue(ctx, colKey, c)
@@ -109,11 +100,11 @@ func (s mongoStg) Reserve(ctx context.Context) (context.Context, ReleaseFunc) {
 }
 
 // col return collection preserved in context
-func col(ctx context.Context) *mgo.Collection {
+func (s mongoStg) col(ctx context.Context) *mgo.Collection {
 	c, ok := ctx.Value(colKey).(*mgo.Collection)
 	if !ok {
 		log.Println("no collection in context") // todo: write call stack
-		c = s.base.DB().C(MGO_COLLECTION)
+		c = s.main.DB("").C(MGO_COLLECTION)
 	}
 	return c
 }
@@ -130,7 +121,7 @@ func col(ctx context.Context) *mgo.Collection {
 // UserByCreds Looks for user by email and password
 func (s mongoStg) UserSearch(ctx context.Context, filter model.Fields) (*model.User, error) {
 	udb := &UserDB{}
-	err := col(ctx).Find(bson.M(filter)).One(udb)
+	err := s.col(ctx).Find(bson.M(filter)).One(udb)
 	return udb.Model(), err
 }
 
@@ -141,13 +132,13 @@ func (s mongoStg) UserInsert(ctx context.Context, userm *model.User) (*model.Use
 		ID:   bson.NewObjectId(),
 	}
 
-	err := col(ctx).Insert(user)
+	err := s.col(ctx).Insert(user)
 	return user.Model(), err
 }
 
 func (s mongoStg) UserGet(ctx context.Context, userid string) (*model.User, error) {
 	user := &UserDB{}
-	err := getByID(ctx, userid, user, nil)
+	err := s.getByID(ctx, userid, user, nil)
 
 	return user.Model(), err
 }
@@ -165,7 +156,7 @@ func (s mongoStg) UserSet(ctx context.Context, userid string, fields, filter mod
 	}
 	filter["_id"] = id
 
-	c := col(ctx)
+	c := s.col(ctx)
 	err = c.Update(bson.M(filter), bson.M{"$set": bson.M(fields)})
 	if err != nil {
 		return nil, err
@@ -173,38 +164,38 @@ func (s mongoStg) UserSet(ctx context.Context, userid string, fields, filter mod
 
 	user := &UserDB{}
 	err = c.FindId(id).One(user)
-	return user, err
+	return user.Model(), err
 }
 
 // ########################## Profile CRUD Section ##############################
 
 // ProfileSearch obtains profiles of confirmed users. It limits result (to 1k) for security reasons.
-func (s mongoStg) ProfileSearch(ctx context.Context, fields model.Fields) ([]*model.Profile, error) {
+func (s mongoStg) ProfileSearch(ctx context.Context, filter model.Fields) ([]*model.Profile, error) {
 
 	pdbs := []*ProfileDB{}
-	query := col(ctx).Find(confirm(filter)).Limit(1000)
+	query := s.col(ctx).Find(confirm(filter)).Limit(1000)
 	if err := query.All(&pdbs); err != nil {
 		return nil, err
 	}
 
 	// convert db profiles to model profiles
-	profiles = make([]*model.Profile, 0, len(pdbs))
-	for _, p = range pdbs {
+	profiles := make([]*model.Profile, 0, len(pdbs))
+	for _, p := range pdbs {
 		profiles = append(profiles, p.Model())
 	}
 
-	return profiles, err
+	return profiles, nil
 }
 
 func (s mongoStg) ProfileGet(ctx context.Context, profid string) (*model.Profile, error) {
 	item := &ProfileDB{}
-	err := getByID(ctx, profid, item, confirm(nil))
+	err := s.getByID(ctx, profid, item, confirm(nil))
 
 	return item.Model(), err
 }
 
 // ProfileUpdate updates profile and saves history changes
-func (s mongoStg) ProfileUpdate(ctx context.Context, profile *model.Profile) ([]*model.Profile, error) {
+func (s mongoStg) ProfileUpdate(ctx context.Context, profile *model.Profile) (*model.Profile, error) {
 
 	// check permissions.
 	// todo: remove this crutch if common permission workflow is implemented
@@ -229,10 +220,11 @@ func (s mongoStg) ProfileUpdate(ctx context.Context, profile *model.Profile) ([]
 		},
 	}
 
+	oid, _ := toObjectId(profile.ID) // err already checked above
 	filter := confirm(nil)
-	filter["_id"] = toObjectId(profile.ID)
+	filter["_id"] = oid
 
-	err = c.Update(filter, update)
+	err = s.col(ctx).Update(filter, update)
 
 	return profile, err
 }
@@ -246,12 +238,27 @@ func (s mongoStg) HistoryGet(ctx context.Context, profid string) ([]*model.Chang
 		return nil, err
 	}
 
-	changes := []ChangesDB{}
-	err := getByID(ctx, profid, &changes, confirm(nil))
+	changes := &ChangesDB{}
+	err := s.getByID(ctx, profid, changes, confirm(nil))
 	return changes.Model(), err
 }
 
 // ############### helper functions #################
+
+// fetch mongo object by string id
+func (s mongoStg) getByID(ctx context.Context, id string, obj interface{}, filter bson.M) error {
+	oid, err := toObjectId(id)
+	if err != nil {
+		return err
+	}
+
+	if filter == nil {
+		filter = bson.M{}
+	}
+	filter["_id"] = oid
+
+	return s.col(ctx).Find(filter).One(obj)
+}
 
 // confirm adds to filter confirm clause
 func confirm(filter model.Fields) bson.M {
@@ -265,31 +272,17 @@ func confirm(filter model.Fields) bson.M {
 // toObjectId checks string first because ObjectIdHex(id) panics on incorrect input
 func toObjectId(id string) (bson.ObjectId, error) {
 	if !bson.IsObjectIdHex(id) {
-		return bson.ObjectId{}, fmt.Errorf("Can't convert to ObjectId %s", id)
+		return "", fmt.Errorf("Can't convert to ObjectId \"%s\"", id)
 	}
 
 	return bson.ObjectIdHex(id), nil
 }
 
-// fetch mongo object by string id
-func getByID(ctx context.Context, id string, obj interface{}, filter bson.M) error {
-	oid, err := toObjectId(id)
-	if err != nil {
-		return nil, err
-	}
-
-	if filter == nil {
-		filter = bson.M{}
-	}
-	filter["_id"] = oid
-
-	return col(ctx).Find(filter).One(obj)
-}
-
 // requestAccess checks if context user is entitled to access the object
 func requestAccess(ctx context.Context, id string) error {
-	user := middle.CtxUser(ctx)
+	user := model.CtxUser(ctx)
 	if user.ID != id {
-		return nil, mgo.ErrNotFound
+		return mgo.ErrNotFound
 	}
+	return nil
 }

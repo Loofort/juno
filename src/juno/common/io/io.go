@@ -2,18 +2,20 @@ package io
 
 import (
 	"encoding/json"
-	"fmt"
 	"log"
 	"net/http"
 )
 
 // error messages displayed to client
 const (
-	ERR_DB        = "Oops! database problem, try again latter"
-	ERR_NOPROF    = "profile not found"
-	ERR_NOUSER    = "user not found"
-	ERR_REQ       = "something wrong with your request body"
-	ERR_FORBIDDEN = "Forbidden"
+	ERR_DB           = "Oops! database problem, try again latter"
+	ERR_NOPROF       = "profile not found"
+	ERR_NOUSER       = "user not found"
+	ERR_REQ          = "something wrong with your request body"
+	ERR_FORBIDDEN    = "Forbidden"
+	ERR_UNAUTHORIZED = "Unauthorized"
+
+	JUNO_ERR_HEADER = "Juno-Err"
 )
 
 // Input obtains request json body and fills up object with data
@@ -39,7 +41,7 @@ func Output(w http.ResponseWriter, obj interface{}) {
 	}
 
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	n, err = w.Write(b)
+	n, err := w.Write(b)
 	if err != nil {
 		log.Println(err)
 		return
@@ -48,6 +50,8 @@ func Output(w http.ResponseWriter, obj interface{}) {
 		log.Printf("sent output butes count %d, but expected %d", n, len(b))
 		return
 	}
+
+	log.Printf("DUMP RESP: %s\n", string(b))
 }
 
 // httpErr represent JSON error response
@@ -58,16 +62,17 @@ type ErrJSON struct {
 
 // Send error with code 400
 func ErrClient(w http.ResponseWriter, msg string) {
-	OutErr(w, http.StatusBadRequest, msg)
+	Err(w, msg, http.StatusBadRequest)
 }
 
 // Send error with code 500
 func ErrServer(w http.ResponseWriter, msg string) {
-	OutErr(w, http.StatusBadRequest, msg)
+	Err(w, msg, http.StatusInternalServerError)
 }
 
 // Err responds to client with HTTP code and JSON error body
 func Err(w http.ResponseWriter, msg string, code int) {
+	w.Header().Add(JUNO_ERR_HEADER, msg)
 	w.WriteHeader(code)
 	Output(w, ErrJSON{code, msg})
 }

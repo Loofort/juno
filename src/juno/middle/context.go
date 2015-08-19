@@ -3,8 +3,9 @@ package middle
 import (
 	"github.com/dimfeld/httptreemux"
 	"golang.org/x/net/context"
-	"juno/storage"
-	"log"
+	"juno/model"
+	"juno/model/storage"
+	"net/http"
 )
 
 // following types are common for each router middlewares
@@ -24,11 +25,12 @@ type (
 // contextMW implements ContextRouter interface
 type contextMW struct {
 	base Router
+	stg  storage.Storage
 }
 
 // Context creates context aware wrapper for usual router
 func Context(base Router, stg storage.Storage) ContextRouter {
-	return contextMW{base}
+	return contextMW{base, stg}
 }
 
 // Handle creates adapter handler to be called by usual router.
@@ -39,18 +41,18 @@ func (mw contextMW) Handle(method, path string, handler JunoHandler) {
 		// it also might be used to cancel current session, by request or by timeout (not implemented).
 
 		// there is no timeout requirements, so create just cancelable context
-		ctx, cancel = context.WithCancel(context.Background())
+		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 
 		// add Params to context
 		ctx = setCtxParam(ctx, p)
 
 		// add anonym user. It might be overrided in authentication mw
-		ctx = setCtxUser(ctx, model.Anonym())
+		ctx = model.SetCtxUser(ctx, model.Anonym())
 
 		// storage may want to reserve resource per session that has to release at the end
 		// put it in context too
-		ctx, release := mv.stg.Reserve(ctx)
+		ctx, release := mw.stg.Reserve(ctx)
 		defer release()
 
 		handler(ctx, w, r)
@@ -62,7 +64,6 @@ func (mw contextMW) Handle(method, path string, handler JunoHandler) {
 type ctxKey int
 
 var paramsKey ctxKey = 0
-var userKey ctxKey = 1
 
 // setCtxParams adds params to context
 func setCtxParam(ctx context.Context, p map[string]string) context.Context {
@@ -71,24 +72,10 @@ func setCtxParam(ctx context.Context, p map[string]string) context.Context {
 
 // CtxParams obtains param by name from context , second variable is false when no param is found
 func CtxParam(ctx context.Context, name string) (string, bool) {
-	p, ok := ctx.Value(paramsKey).(map[string]string)
+	params, ok := ctx.Value(paramsKey).(map[string]string)
 	if !ok {
 		return "", ok
 	}
-	return p[name]
-}
-
-// setCtxUser adds user object to conext
-func setCtxUser(ctx context.Context, user *model.User) context.Context {
-	return context.WithValue(ctx, userKey, p)
-}
-
-// CtxUser returns User from context
-func CtxUser(ctx context.Context) *model.User {
-	user, ok := ctx.Value(userKey).(*model.User)
-	if !ok {
-		log.Println("no user in context") // todo: write call stack
-		user = model.Anonym()
-	}
-	return user
+	p, ok := params[name]
+	return p, ok
 }

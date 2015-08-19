@@ -1,9 +1,10 @@
-package ckeck
+package check
 
 import (
 	"juno/common/io"
 	"log"
 	"net/http"
+	"os"
 )
 
 // initialize custom loger, because we will use log.Output(calldepth, msg)
@@ -22,7 +23,7 @@ func DBErr(w http.ResponseWriter, err error) bool {
 	return false
 }
 
-func InputErr(r *http.Request, obj interface{}) bool {
+func InputErr(w http.ResponseWriter, r *http.Request, obj interface{}) bool {
 	if err := io.Input(r, obj); err != nil {
 		io.ErrClient(w, io.ERR_REQ)
 		return true

@@ -1,7 +1,6 @@
 package middle
 
 import (
-	"fmt"
 	"net/http"
 	"strings"
 )
@@ -19,12 +18,14 @@ func JSONContentType(h http.Handler) http.Handler {
 
 // Overwrited method that performs the Content-Type check
 func (ch jsonChecker) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-
 	ct := r.Header.Get("Content-Type")
-	if strings.Index(ct, "application/json") == -1 {
-		// send error as plain text
-		http.Error(w, http.StatusText(http.StatusUnsupportedMediaType), http.StatusUnsupportedMediaType)
-		return
+	switch r.Method {
+	case "POST", "PUT", "PATCH":
+		if strings.Index(ct, "application/json") == -1 {
+			// send error as plain text
+			http.Error(w, http.StatusText(http.StatusUnsupportedMediaType), http.StatusUnsupportedMediaType)
+			return
+		}
 	}
 
 	ch.Handler.ServeHTTP(w, r)

@@ -9,7 +9,7 @@ import (
 // ModelDB represent structure for all BL objects
 type ModelDB struct {
 	ID         bson.ObjectId `bson:"_id"`
-	model.User `bson:"inline"`
+	model.User `bson:",inline"`
 	Profile    model.Profile
 	Changes    []*model.Change
 }
@@ -17,7 +17,7 @@ type ModelDB struct {
 // User represents mongo specific fields for model User
 type UserDB struct {
 	ID         bson.ObjectId `bson:"_id"`
-	model.User `bson:"inline"`
+	model.User `bson:",inline"`
 }
 
 func (db *UserDB) Model() *model.User {
@@ -43,7 +43,7 @@ type ChangesDB struct {
 }
 
 func (db *ChangesDB) Model() []*model.Change {
-	return db.Profile.Changes
+	return db.Changes
 }
 
 // storage represents CRUD-like operation for each object
@@ -59,15 +59,15 @@ type Storage interface {
 	UserSearch(ctx context.Context, filter model.Fields) (*model.User, error)
 	UserInsert(ctx context.Context, user *model.User) (*model.User, error)
 	UserGet(ctx context.Context, userid string) (*model.User, error)
-	UserSet(ctx context.Context, fields, filter model.Fields) (*model.User, error)
+	UserSet(ctx context.Context, userid string, fields, filter model.Fields) (*model.User, error)
 
 	// ############## Profile Section ###################
-	ProfileSearch(ctx context.Context, filter model.M) ([]*model.Profile, error)
+	ProfileSearch(ctx context.Context, filter model.Fields) ([]*model.Profile, error)
 	ProfileGet(ctx context.Context, profid string) (*model.Profile, error)
 	ProfileUpdate(ctx context.Context, profile *model.Profile) (*model.Profile, error)
 
 	// ############## History Section ###################
-	HistoryGet(ctx context.Context, histid string) (*model.History, error)
+	HistoryGet(ctx context.Context, histid string) ([]*model.Change, error)
 }
 
 // type of function that release db resourses

@@ -1,20 +1,24 @@
 package main
 
 import (
+	"fmt"
 	"github.com/bndr/gopencils"
 	"juno/common/io"
+	"juno/model"
+	"log"
 	"os"
+	"strconv"
 	"testing"
 	"time"
 )
 
-var apiurl string = "http://localhost" + os.Getenv("JUNO_PORT") + "/v1/"
+var apiurl string = fmt.Sprintf("http://localhost:%s/%s", os.Getenv("JUNO_PORT"), VER)
 
 // acceptance test for juno server. Server should be up and running
-func LiveCircleTest(t *testing.T) {
+func TestJunoLiveCircle(t *testing.T) {
 
-	now := time.Now().String()
-	email, pass := "test"+now+"@mail.com", "pass"+now
+	sufix := rand()
+	email, pass := "user"+sufix+"@mail.com", "pass"+sufix
 	auth := &gopencils.BasicAuth{email, pass}
 
 	//############# register and confirm new user ################
@@ -51,7 +55,7 @@ func LiveCircleTest(t *testing.T) {
 
 	profile.FirstName = "John"
 	profile.LastName = "Smith"
-	profile.Address = "100 E. 17th Street, New York"
+	profile.Address = "100 E. 17th Street, New&nbsp;<York>"
 	profile.Phone = "+1-212-674-4300"
 	profile.Age = 30
 	profile, err = updateProfile(auth, profile)
@@ -65,7 +69,6 @@ func LiveCircleTest(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	t.Logf("final profile for %s: %v", email, profile)
 	if profile.FirstName != "Will" {
 		t.Fatal("profile hasn't been updated")
 	}
@@ -75,7 +78,7 @@ func LiveCircleTest(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	t.Logf("profile changes for %s: %v", email, changes)
+	t.Logf("profile changes: %v", changes)
 	if len(changes) != 2 {
 		t.Fatalf("history changes: expected 2, but get %d", len(changes))
 	}
@@ -89,26 +92,26 @@ func LiveCircleTest(t *testing.T) {
 		t.Fatal("can't obtain profiles")
 	}
 
-	profid = profiles[0].ID
-	profile, err = getProfile(profid)
-	if err != nil {
-		t.Fatal(err)
-	}
-
+	profile = profiles[0]
 	profile.FirstName = "Anon"
 	profile, err = updateProfile(nil, profile)
 	if err == nil {
 		t.Fatalf("anon update profile: expected error, but get profile %v", profile)
 	}
 
-	changes, err = getHistory(nil, profid)
+	profile, err = getProfile(profiles[0].ID)
 	if err != nil {
+		t.Fatal(err)
+	}
+
+	changes, err = getHistory(nil, profid)
+	if err == nil {
 		t.Fatalf("anon view history: expected error, but get changes %v", changes)
 	}
 }
 
-func ArbitraryAccessTest(t *testing.T) {
-	userid := time.Now().String()
+func TestJunoArbitraryAccess(t *testing.T) {
+	userid := rand()
 	_, err := confirm(userid)
 	if err == nil {
 		t.Fatal("Arbitrary confirm should return error")
@@ -120,27 +123,33 @@ func ArbitraryAccessTest(t *testing.T) {
 	}
 }
 
-func CrossAccessTest(t *testing.T) {
-	now := time.Now().String()
-	email1, pass1 := "test1"+now+"@mail.com", "pass1"+now
-	email2, pass2 := "test2"+now+"@mail.com", "pass2"+now
+func TestJunoCrossAccess(t *testing.T) {
+	sufix := rand()
+	email1, pass1 := "test1"+sufix+"@mail.com", "pass1"+sufix
+	email2, pass2 := "test2"+sufix+"@mail.com", "pass2"+sufix
 
 	auth1, profile1 := register(t, email1, pass1)
 	auth2, profile2 := register(t, email2, pass2)
 
 	profile1.FirstName = "hacked"
-	profile1, err = updateProfile(auth2, profile1)
+
+	profile, err := updateProfile(auth2, profile1)
 	if err == nil {
-		t.Fatalf("cross update profile: expected error, but get profile %v", profile1)
+		t.Fatalf("cross update profile: expected error, but get profile %v", profile)
 	}
 
-	changes, err = getHistory(auth1, profile2.ID)
-	if err != nil {
+	changes, err := getHistory(auth1, profile2.ID)
+	if err == nil {
 		t.Fatalf("cross view history: expected error, but get changes %v", changes)
 	}
 }
 
 // ############################ Help Functions ####################################
+
+// rand returns arbitrary string based on time
+func rand() string {
+	return strconv.FormatInt(time.Now().UnixNano(), 16)
+}
 
 // register creates new fake user
 func register(t *testing.T, email, pass string) (*gopencils.BasicAuth, *model.Profile) {
@@ -169,7 +178,7 @@ func register(t *testing.T, email, pass string) (*gopencils.BasicAuth, *model.Pr
 }
 
 // returns user id
-func createUser(email, pass) (string, error) {
+func createUser(email, pass string) (string, error) {
 	api := gopencils.Api(apiurl)
 	user := &model.User{
 		Email:    email,
@@ -177,13 +186,18 @@ func createUser(email, pass) (string, error) {
 	}
 
 	outmap := map[string]interface{}{}
-	res, err := api.Res("user", outmap).Post(user)
+	res, err := api.Res("user", &outmap).Post(user)
 
 	if err = checkErr(res, err); err != nil {
 		return "", err
 	}
 
-	return outmap["id"].(string), nil
+	id, ok := outmap["id"].(string)
+	if !ok {
+		return "", fmt.Errorf("can't get user id, resp: %#v", outmap)
+	}
+
+	return id, nil
 }
 
 // returns profile id
@@ -191,20 +205,25 @@ func confirm(userid string) (string, error) {
 	api := gopencils.Api(apiurl)
 
 	outmap := map[string]interface{}{}
-	res, err := api.Res("user", outmap).Id(userid).Get()
+	res, err := api.Res("user").Id(userid).Res("confirm", &outmap).Get()
 
 	if err = checkErr(res, err); err != nil {
 		return "", err
 	}
 
-	return outmap["id"].(string), nil
+	id, ok := outmap["id"].(string)
+	if !ok {
+		return "", fmt.Errorf("can't get user id, resp: %#v", outmap)
+	}
+
+	return id, nil
 }
 
 func allProfiles() ([]*model.Profile, error) {
 	api := gopencils.Api(apiurl)
 
 	profiles := []*model.Profile{}
-	res, err := api.Res("profile", &profiles).Get()
+	res, err := api.Res("profile").Res("all", &profiles).Get()
 
 	if err = checkErr(res, err); err != nil {
 		return nil, err
@@ -213,7 +232,7 @@ func allProfiles() ([]*model.Profile, error) {
 	return profiles, nil
 }
 
-func getProfile(profid string) (*model.Profile, err) {
+func getProfile(profid string) (*model.Profile, error) {
 	api := gopencils.Api(apiurl)
 
 	profile := &model.Profile{}
@@ -226,7 +245,7 @@ func getProfile(profid string) (*model.Profile, err) {
 	return profile, nil
 }
 
-func updateProfile(auth *gopencils.BasicAuth, profile *model.Profile) (*model.Profile, err) {
+func updateProfile(auth *gopencils.BasicAuth, profile *model.Profile) (*model.Profile, error) {
 	api := gopencils.Api(apiurl, auth)
 
 	updatedProfile := &model.Profile{}
@@ -243,7 +262,7 @@ func getHistory(auth *gopencils.BasicAuth, profid string) ([]*model.Change, erro
 	api := gopencils.Api(apiurl, auth)
 
 	changes := []*model.Change{}
-	res, err := api.Res("profile", &changes).Id(profid).Res("history", changes).Get()
+	res, err := api.Res("profile").Id(profid).Res("history", &changes).Get()
 
 	if err = checkErr(res, err); err != nil {
 		return nil, err
@@ -254,13 +273,14 @@ func getHistory(auth *gopencils.BasicAuth, profid string) ([]*model.Change, erro
 
 func checkErr(res *gopencils.Resource, err error) error {
 	if err != nil {
+		log.Printf("err in checkErr %v", err)
 		return err
 	}
 
-	eresp := &io.ErrJSON{}
-	err = json.NewDecoder(res.Row.Body).Decode(eresp)
-	if err != nil {
-		return err
+	if res.Raw.StatusCode >= 400 {
+		msg := res.Raw.Header.Get(io.JUNO_ERR_HEADER)
+		return fmt.Errorf("err %d: %s", res.Raw.StatusCode, msg)
 	}
 
+	return nil
 }

@@ -1,6 +1,8 @@
 package model
 
 import (
+	"golang.org/x/net/context"
+	"log"
 	"time"
 )
 
@@ -12,8 +14,8 @@ var anonym = User{
 }
 
 // Anonym returns a copy of special anonym user
-func Anonym() *model.User {
-	copyUser := user
+func Anonym() *User {
+	copyUser := anonym
 	return &copyUser
 }
 
@@ -63,7 +65,7 @@ func (p *Profile) Substract(next *Profile) Change {
 
 	// calulate each field manualy
 	// todo: for large object use reflection
-	fileds := make(map[string]ChangedField, 5)
+	fields := make(map[string]ChangedField, 5)
 	if p.FirstName != next.FirstName {
 		fields["FirstName"] = ChangedField{p.FirstName, next.FirstName}
 	}
@@ -80,7 +82,7 @@ func (p *Profile) Substract(next *Profile) Change {
 		fields["Age"] = ChangedField{p.Age, next.Age}
 	}
 
-	change.Fields = fileds
+	change.Fields = fields
 	return change
 }
 
@@ -96,4 +98,24 @@ type Change struct {
 type ChangedField struct {
 	Previous interface{}
 	Current  interface{}
+}
+
+// To avoid key collisions in context we defines an unexported type key
+type ctxKey int
+
+var userKey ctxKey = 0
+
+// setCtxUser adds user object to conext
+func SetCtxUser(ctx context.Context, user *User) context.Context {
+	return context.WithValue(ctx, userKey, user)
+}
+
+// CtxUser returns User from context
+func CtxUser(ctx context.Context) *User {
+	user, ok := ctx.Value(userKey).(*User)
+	if !ok {
+		log.Println("no user in context") // todo: write call stack
+		user = Anonym()
+	}
+	return user
 }

@@ -1,12 +1,15 @@
 package middle
 
 import (
+	"bytes"
 	"encoding/base64"
 	"golang.org/x/net/context"
+	"juno/common/check"
 	"juno/common/io"
 	"juno/model"
 	"juno/model/storage"
 	"net/http"
+	"strings"
 )
 
 // authMW is the Authentication aware router type
@@ -39,7 +42,7 @@ func (mw authMW) Handle(method, path string, handler JunoHandler) {
 					user, err := mw.stg.UserSearch(ctx, filter)
 
 					if mw.stg.IsErrNotFound(err) {
-						io.Err(w, http.StatusForbidden, io.ERR_FORBIDDEN)
+						io.Err(w, io.ERR_FORBIDDEN, http.StatusForbidden)
 						return
 					}
 					if check.DBErr(w, err) {
@@ -47,7 +50,7 @@ func (mw authMW) Handle(method, path string, handler JunoHandler) {
 					}
 
 					// put user to context
-					ctx = setCtxUser(ctx, user)
+					ctx = model.SetCtxUser(ctx, user)
 
 					// Delegate request to the given handle
 					handler(ctx, w, r)
@@ -58,9 +61,9 @@ func (mw authMW) Handle(method, path string, handler JunoHandler) {
 
 		// Request Basic Authentication otherwise
 		w.Header().Set("WWW-Authenticate", "Basic realm=\"Private Area\"")
-		io.SendErr(w, http.StatusUnauthorized, "Unauthorized")
+		io.Err(w, io.ERR_UNAUTHORIZED, http.StatusUnauthorized)
 	}
 
 	// configure base router with auth handler
-	mw.base.Handle(method, path, authHandler)
+	mw.base.Handle(method, path, JunoHandler(authHandler))
 }
