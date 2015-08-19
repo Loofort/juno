@@ -7,6 +7,15 @@ import (
 	"net/http"
 )
 
+// error messages displayed to client
+const (
+	ERR_DB        = "Oops! database problem, try again latter"
+	ERR_NOPROF    = "profile not found"
+	ERR_NOUSER    = "user not found"
+	ERR_REQ       = "something wrong with your request body"
+	ERR_FORBIDDEN = "Forbidden"
+)
+
 // Input obtains request json body and fills up object with data
 func Input(r *http.Request, obj interface{}) error {
 	dec := json.NewDecoder(r.Body)

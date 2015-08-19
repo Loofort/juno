@@ -6,9 +6,17 @@ import (
 	"juno/model"
 )
 
+// ModelDB represent structure for all BL objects
+type ModelDB struct {
+	ID         bson.ObjectId `bson:"_id"`
+	model.User `bson:"inline"`
+	Profile    model.Profile
+	Changes    []*model.Change
+}
+
 // User represents mongo specific fields for model User
 type UserDB struct {
-	ID         bson.ObjectId `bson:"_id,omitempty"`
+	ID         bson.ObjectId `bson:"_id"`
 	model.User `bson:"inline"`
 }
 
@@ -19,8 +27,8 @@ func (db *UserDB) Model() *model.User {
 
 // Profile represents mongo specific fields for model Profile
 type ProfileDB struct {
-	ID      bson.ObjectId `bson:"_id,omitempty"`
-	Profile model.Profile `bson:"profile"`
+	ID      bson.ObjectId `bson:"_id"`
+	Profile model.Profile
 }
 
 func (db *ProfileDB) Model() *model.Profile {
@@ -30,15 +38,16 @@ func (db *ProfileDB) Model() *model.Profile {
 
 // ChangesDB is the mongo specific wrapper for model []Change
 type ChangesDB struct {
-	ProfileDB `bson:"changes"`
-	Changes   []*model.Change `bson:"changes"`
+	ID      bson.ObjectId `bson:"_id"`
+	Changes []*model.Change
 }
 
 func (db *ChangesDB) Model() []*model.Change {
-	return db.Changes
+	return db.Profile.Changes
 }
 
-// Storage represent DB layer, it is aware of model, but model doesn't aware of storage
+// storage represents CRUD-like operation for each object
+// it is aware of model, but model doesn't aware of storage
 // For now only mongoDB is available
 type Storage interface {
 	Reserve(ctx context.Context) (context.Context, ReleaseFunc)
@@ -47,17 +56,18 @@ type Storage interface {
 	IsErrDup(error) bool
 
 	// ############## User Section ########################
-	UserByCreds(ctx context.Context, email, pass string) (*model.User, error)
+	UserSearch(ctx context.Context, filter model.Fields) (*model.User, error)
 	UserInsert(ctx context.Context, user *model.User) (*model.User, error)
 	UserGet(ctx context.Context, userid string) (*model.User, error)
-	UserUpdate(ctx context.Context, user *model.User) (*model.User, error)
+	UserSet(ctx context.Context, fields, filter model.Fields) (*model.User, error)
 
 	// ############## Profile Section ###################
-	ProfileAll(ctx context.Context) ([]*model.Profile, error)
+	ProfileSearch(ctx context.Context, filter model.M) ([]*model.Profile, error)
 	ProfileGet(ctx context.Context, profid string) (*model.Profile, error)
-	ProfileGetW(ctx context.Context, profid string) (*model.Profile, error)
-	ProfileUpdateHistory(ctx context.Context, prev, curr *model.Profile) (*model.Profile, error)
-	ProfileHistory(ctx context.Context, profid string) (*[]model.Change, error)
+	ProfileUpdate(ctx context.Context, profile *model.Profile) (*model.Profile, error)
+
+	// ############## History Section ###################
+	HistoryGet(ctx context.Context, histid string) (*model.History, error)
 }
 
 // type of function that release db resourses

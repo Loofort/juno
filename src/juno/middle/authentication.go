@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"golang.org/x/net/context"
 	"juno/common/io"
+	"juno/model"
 	"juno/model/storage"
 	"net/http"
 )
@@ -33,14 +34,16 @@ func (mw authMW) Handle(method, path string, handler JunoHandler) {
 			if err == nil {
 				pair := bytes.SplitN(payload, []byte(":"), 2)
 				if len(pair) == 2 {
-					// check user in storage.
-					user, err := mw.stg.UserByCreds(ctx, string(pair[0]), string(pair[1]))
-					if err != nil {
-						io.ErrServer(w, "Oops! database problem, try again latter")
-						return true
+					// look for user in storage.
+					filter := model.Fields{"email": string(pair[0]), "password": string(pair[1])}
+					user, err := mw.stg.UserSearch(ctx, filter)
+
+					if mw.stg.IsErrNotFound(err) {
+						io.Err(w, http.StatusForbidden, io.ERR_FORBIDDEN)
+						return
 					}
-					if user == nil {
-						io.SendErr(w, http.StatusForbidden, "Forbidden")
+					if check.DBErr(w, err) {
+						return
 					}
 
 					// put user to context

@@ -56,10 +56,17 @@ func MgoMustConnect(mhost, database, name, pass string) Storage {
 			Background: true,
 			Sparse:     true,
 		},
+		// to get confirmed user
+		Index{
+			Key:        []string{"_id", "confirm"},
+			Unique:     true,
+			Background: true,
+			Sparse:     true,
+		},
 	}
 
 	for _, index = range indexes {
-		if err := c.EnsureIndex(uniqEmail); err != nil {
+		if err := c.EnsureIndex(index); err != nil {
 			panic(err)
 		}
 	}
@@ -111,7 +118,7 @@ func col(ctx context.Context) *mgo.Collection {
 	return c
 }
 
-// ###################### User Section #########################
+// ###################### User CRUD Section #########################
 
 // todo: implement permission check to all methods:
 //  get current user from context (may be anonym).
@@ -121,11 +128,9 @@ func col(ctx context.Context) *mgo.Collection {
 //  additionally we need check ownership by $or clause
 
 // UserByCreds Looks for user by email and password
-func (s mongoStg) UserByCreds(ctx context.Context, email, password string) (*model.User, error) {
+func (s mongoStg) UserSearch(ctx context.Context, filter model.Fields) (*model.User, error) {
 	udb := &UserDB{}
-	filter := bson.M{"email": email, "password": password}
-
-	err := col(ctx).Find(filter).One(udb)
+	err := col(ctx).Find(bson.M(filter)).One(udb)
 	return udb.Model(), err
 }
 
@@ -142,20 +147,26 @@ func (s mongoStg) UserInsert(ctx context.Context, userm *model.User) (*model.Use
 
 func (s mongoStg) UserGet(ctx context.Context, userid string) (*model.User, error) {
 	user := &UserDB{}
-	err := getByID(ctx, userid, user)
+	err := getByID(ctx, userid, user, nil)
 
 	return user.Model(), err
 }
 
-// UserConfirm find and modify user, it will rise ErrNotFound if user is already confirmed
-func (s mongoStg) UserConfirm(ctx context.Context, userid string) (*model.User, error) {
+// UserSet gets user applying optional filter and modifies the object
+// it will rise ErrNotFound if user is already confirmed
+func (s mongoStg) UserSet(ctx context.Context, userid string, fields, filter model.Fields) (*model.User, error) {
 	id, err := toObjectId(userid)
 	if err != nil {
 		return nil, err
 	}
 
+	if filter == nil {
+		filter = model.Fields{}
+	}
+	filter["_id"] = id
+
 	c := col(ctx)
-	err = c.Update(bson.M{"_id": id, "confirm": false}, bson.M{"confirm": true})
+	err = c.Update(bson.M(filter), bson.M{"$set": bson.M(fields)})
 	if err != nil {
 		return nil, err
 	}
@@ -165,15 +176,13 @@ func (s mongoStg) UserConfirm(ctx context.Context, userid string) (*model.User, 
 	return user, err
 }
 
-// ########################## Profile Section ##############################
+// ########################## Profile CRUD Section ##############################
 
-// ProfileAll obtains profiles of confirmed users. It limits result (to 1k) for security reasons.
-func (s mongoStg) ProfileAll(ctx context.Context) ([]*model.Profile, error) {
-
-	query := col(ctx).Find(bson.M{"confirm": true})
-	query = query.Select(bson.M{"profile": 1}).Limit(1000)
+// ProfileSearch obtains profiles of confirmed users. It limits result (to 1k) for security reasons.
+func (s mongoStg) ProfileSearch(ctx context.Context, fields model.Fields) ([]*model.Profile, error) {
 
 	pdbs := []*ProfileDB{}
+	query := col(ctx).Find(confirm(filter)).Limit(1000)
 	if err := query.All(&pdbs); err != nil {
 		return nil, err
 	}
@@ -189,41 +198,69 @@ func (s mongoStg) ProfileAll(ctx context.Context) ([]*model.Profile, error) {
 
 func (s mongoStg) ProfileGet(ctx context.Context, profid string) (*model.Profile, error) {
 	item := &ProfileDB{}
-	err := getByID(ctx, profid, item)
+	err := getByID(ctx, profid, item, confirm(nil))
 
 	return item.Model(), err
 }
 
-// ProfileGetW looks for the profile on behalf of context user.
-// If profile is not found, It could mean user doesn't have write permisson for the profile
-func (s mongoStg) ProfileGetW(ctx context.Context, profid string) (*model.Profile, error) {
+// ProfileUpdate updates profile and saves history changes
+func (s mongoStg) ProfileUpdate(ctx context.Context, profile *model.Profile) ([]*model.Profile, error) {
 
 	// check permissions.
-	// todo: remove this crutch if common permission workflow was implemented
-	if err := requestAccess(ctx, profid); err != nil {
+	// todo: remove this crutch if common permission workflow is implemented
+	if err := requestAccess(ctx, profile.ID); err != nil {
 		return nil, err
 	}
 
-	return s.ProfileGet(ctx, profid)
+	prev, err := s.ProfileGet(ctx, profile.ID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Substract profile changes
+	change := prev.Substract(profile)
+
+	update := bson.M{
+		"$set": bson.M{
+			"profile": profile,
+		},
+		"$push": bson.M{
+			"changes": change,
+		},
+	}
+
+	filter := confirm(nil)
+	filter["_id"] = toObjectId(profile.ID)
+
+	err = c.Update(filter, update)
+
+	return profile, err
 }
 
-// ProfileHistory requests changes on behalf of context user.
-func (s mongoStg) ProfileHistory(ctx context.Context, profid string) (*model.Profile, error) {
+// ################ History CRUD section ####################
+
+// HistoryGet requests changes on behalf of context user.
+func (s mongoStg) HistoryGet(ctx context.Context, profid string) ([]*model.Change, error) {
 	// check permissions
 	if err := requestAccess(ctx, profid); err != nil {
 		return nil, err
 	}
 
 	changes := []ChangesDB{}
-	err := getByID(ctx, profid, &changes)
+	err := getByID(ctx, profid, &changes, confirm(nil))
 	return changes.Model(), err
 }
 
-// ProfileUpdateHistory substracts current and next profiles and save profile with changes
-func (s mongoStg) ProfileUpdateHistory(ctx context.Context, curr, next *model.Profile) ([]*model.Change, error) {
-}
-
 // ############### helper functions #################
+
+// confirm adds to filter confirm clause
+func confirm(filter model.Fields) bson.M {
+	if filter == nil {
+		filter = model.Fields{}
+	}
+	filter["confirm"] = true
+	return bson.M(filter)
+}
 
 // toObjectId checks string first because ObjectIdHex(id) panics on incorrect input
 func toObjectId(id string) (bson.ObjectId, error) {
@@ -235,13 +272,18 @@ func toObjectId(id string) (bson.ObjectId, error) {
 }
 
 // fetch mongo object by string id
-func getByID(ctx context.Context, id string, obj interface{}) error {
+func getByID(ctx context.Context, id string, obj interface{}, filter bson.M) error {
 	oid, err := toObjectId(id)
 	if err != nil {
 		return nil, err
 	}
 
-	return col(ctx).FindId(oid).One(obj)
+	if filter == nil {
+		filter = bson.M{}
+	}
+	filter["_id"] = oid
+
+	return col(ctx).Find(filter).One(obj)
 }
 
 // requestAccess checks if context user is entitled to access the object
