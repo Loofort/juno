@@ -13,6 +13,37 @@
 			"repository": "https://github.com/bndr/gopencils",
 			"revision": "e9c8039cf77402adfa4a6ae94bd7b3416f77c0a4",
 			"branch": "master"
+		},
+		{
+			"importpath": "github.com/dimfeld/httppath",
+			"repository": "https://github.com/dimfeld/httppath",
+			"revision": "c8e499c3ef3c3e272ed8bdcc1ccf39f73c88debc",
+			"branch": "master"
+		},
+		{
+			"importpath": "github.com/dimfeld/httptreemux",
+			"repository": "https://github.com/dimfeld/httptreemux",
+			"revision": "89abad64706614f5e043bed9bbb7c9c3518d1faa",
+			"branch": "master"
+		},
+		{
+			"importpath": "golang.org/x/net/context",
+			"repository": "https://go.googlesource.com/net",
+			"revision": "66f0418ca41253f8d1a024eb9754e9441a8e79b9",
+			"branch": "master",
+			"path": "/context"
+		},
+		{
+			"importpath": "gopkg.in/mgo.v2",
+			"repository": "https://gopkg.in/mgo.v2",
+			"revision": "3569c88678d88179dcbd68d02ab081cbca3cd4d0",
+			"branch": "v2"
+		},
+		{
+			"importpath": "gopkg.in/tomb.v2",
+			"repository": "https://gopkg.in/tomb.v2",
+			"revision": "14b3d72120e8d10ea6e6b7f87f7175734b1faab8",
+			"branch": "v2"
 		}
 	]
 }
