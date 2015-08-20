@@ -20,7 +20,10 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"io/ioutil"
+	"log"
 	"net/http"
+	"net/http/httputil"
 	"net/url"
 	"strconv"
 )
@@ -201,9 +204,22 @@ func (r *Resource) do(method string) (*Resource, error) {
 		}
 	}
 
+	b, _ := httputil.DumpRequestOut(req, true)
+	log.Printf("--- DUMP REQUEST:\n%s\n\n", string(b))
 	resp, err := r.Api.Client.Do(req)
 	if err != nil {
 		return r, err
+	}
+
+	// Read the content
+	var bodyBytes []byte
+	if resp.Body != nil {
+		bodyBytes, _ = ioutil.ReadAll(resp.Body)
+
+		resp.Body = ioutil.NopCloser(bytes.NewBuffer(bodyBytes))
+		b, _ = httputil.DumpResponse(resp, true)
+		log.Printf("=== DUMP RESPONSE:\n%s\n\n", string(b))
+		resp.Body = ioutil.NopCloser(bytes.NewBuffer(bodyBytes))
 	}
 
 	r.Raw = resp

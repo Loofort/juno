@@ -16,7 +16,7 @@ func JSONContentType(h http.Handler) http.Handler {
 	return jsonChecker{h}
 }
 
-// Overwrited method that performs the Content-Type check
+// Overridet method that performs the Content-Type check
 func (ch jsonChecker) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	ct := r.Header.Get("Content-Type")
 	switch r.Method {
